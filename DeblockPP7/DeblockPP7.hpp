@@ -24,7 +24,7 @@ struct DeblockPP7Data {
     const VSVideoInfo * vi;
     bool process[3];
     int stride[3];
-    unsigned thresh[16];
+    unsigned thresh[16], peak;
     std::unordered_map<std::thread::id, int *> buffer;
     const int16_t factor[16] = {
         N / (N0 * N0), N / (N0 * N1), N / (N0 * N0), N / (N0 * N2),

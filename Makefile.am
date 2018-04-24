@@ -16,6 +16,13 @@ libdeblockpp7_la_SOURCES += DeblockPP7/DeblockPP7_SSE2.cpp \
                             DeblockPP7/vectorclass/vectorclass.h \
                             DeblockPP7/vectorclass/vectorf128.h \
                             DeblockPP7/vectorclass/vectori128.h
+
+noinst_LTLIBRARIES = libsse4.la
+
+libsse4_la_SOURCES = DeblockPP7/DeblockPP7_SSE4.cpp
+libsse4_la_CXXFLAGS = $(AM_CXXFLAGS) -msse4.1
+
+libdeblockpp7_la_LIBADD = libsse4.la
 endif
 
 libdeblockpp7_la_LDFLAGS = -no-undefined -avoid-version $(PLUGINLDFLAGS)

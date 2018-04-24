@@ -24,6 +24,7 @@
 
 #ifdef VS_TARGET_CPU_X86
 template<typename T> extern void pp7Filter_sse2(const VSFrameRef *, VSFrameRef *, const DeblockPP7Data * const VS_RESTRICT, const VSAPI *) noexcept;
+template<typename T> extern void pp7Filter_sse4(const VSFrameRef *, VSFrameRef *, const DeblockPP7Data * const VS_RESTRICT, const VSAPI *) noexcept;
 #endif
 
 template<typename T, int scale>
@@ -132,8 +133,11 @@ static void pp7Filter_c(const VSFrameRef * src, VSFrameRef * dst, const DeblockP
                             }
                         }
                     }
+                    v = (v + (1 << 17)) >> 18;
+                    if (static_cast<unsigned>(v) > d->peak)
+                        v = -v >> 63;
 
-                    dstp[srcStride * y + x] = static_cast<T>((v + (1 << 17)) >> 18);
+                    dstp[srcStride * y + x] = static_cast<T>(v);
                 }
             }
         }
@@ -219,21 +223,27 @@ static void selectFunctions(const unsigned opt, DeblockPP7Data * d) noexcept {
         d->pp7Filter = pp7Filter_c<uint8_t>;
 
 #ifdef VS_TARGET_CPU_X86
-        if ((opt == 0 && iset >= 2) || opt == 2)
+        if ((opt == 0 && iset >= 5) || opt == 3)
+            d->pp7Filter = pp7Filter_sse4<uint8_t>;
+        else if ((opt == 0 && iset >= 2) || opt == 2)
             d->pp7Filter = pp7Filter_sse2<uint8_t>;
 #endif
     } else if (d->vi->format->bytesPerSample == 2) {
         d->pp7Filter = pp7Filter_c<uint16_t>;
 
 #ifdef VS_TARGET_CPU_X86
-        if ((opt == 0 && iset >= 2) || opt == 2)
+        if ((opt == 0 && iset >= 5) || opt == 3)
+            d->pp7Filter = pp7Filter_sse4<uint16_t>;
+        else if ((opt == 0 && iset >= 2) || opt == 2)
             d->pp7Filter = pp7Filter_sse2<uint16_t>;
 #endif
     } else {
         d->pp7Filter = pp7Filter_c<float>;
 
 #ifdef VS_TARGET_CPU_X86
-        if ((opt == 0 && iset >= 2) || opt == 2)
+        if ((opt == 0 && iset >= 5) || opt == 3)
+            d->pp7Filter = pp7Filter_sse4<float>;
+        else if ((opt == 0 && iset >= 2) || opt == 2)
             d->pp7Filter = pp7Filter_sse2<float>;
 #endif
     }
@@ -330,8 +340,8 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
         if (qp < 1 || qp > 63)
             throw std::string{ "qp must be between 1 and 63 (inclusive)" };
 
-        if (opt < 0 || opt > 2)
-            throw std::string{ "opt must be 0, 1 or 2" };
+        if (opt < 0 || opt > 3)
+            throw std::string{ "opt must be 0, 1, 2 or 3" };
 
         if (padWidth || padHeight) {
             VSMap * args = vsapi->createMap();
@@ -361,7 +371,7 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
         const unsigned numThreads = vsapi->getCoreInfo(core)->numThreads;
         d->buffer.reserve(numThreads);
 
-        const int peak = (d->vi->format->sampleType == stInteger) ? (1 << d->vi->format->bitsPerSample) - 1 : 255;
+        d->peak = (d->vi->format->sampleType == stInteger) ? (1 << d->vi->format->bitsPerSample) - 1 : 255;
 
         for (int plane = 0; plane < d->vi->format->numPlanes; plane++) {
             const int width = d->vi->width >> (plane ? d->vi->format->subSamplingW : 0);
@@ -369,7 +379,7 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
         }
 
         for (int i = 0; i < 16; i++)
-            d->thresh[i] = static_cast<unsigned>((((i & 1) ? SN2 : SN0) * ((i & 4) ? SN2 : SN0) * qp * (1 << 2) - 1) * peak / 255);
+            d->thresh[i] = static_cast<unsigned>((((i & 1) ? SN2 : SN0) * ((i & 4) ? SN2 : SN0) * qp * (1 << 2) - 1) * d->peak / 255);
     } catch (const std::string & error) {
         vsapi->setError(out, ("DeblockPP7: " + error).c_str());
         vsapi->freeNode(d->node);

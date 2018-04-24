@@ -1,4 +1,8 @@
 #ifdef VS_TARGET_CPU_X86
+#ifndef __SSE4_1__
+#define __SSE4_1__
+#endif
+
 #include "DeblockPP7.hpp"
 
 template<typename T>
@@ -88,7 +92,7 @@ static inline void dctB(const T1 * srcp, T1 * dstp) noexcept {
 }
 
 template<typename T>
-void pp7Filter_sse2(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Data * const VS_RESTRICT d, const VSAPI * vsapi) noexcept {
+void pp7Filter_sse4(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Data * const VS_RESTRICT d, const VSAPI * vsapi) noexcept {
     const auto threadId = std::this_thread::get_id();
     int * buffer = d->buffer.at(threadId);
 
@@ -160,11 +164,11 @@ void pp7Filter_sse2(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Da
     }
 }
 
-template void pp7Filter_sse2<uint8_t>(const VSFrameRef *, VSFrameRef *, const DeblockPP7Data * const VS_RESTRICT, const VSAPI *) noexcept;
-template void pp7Filter_sse2<uint16_t>(const VSFrameRef *, VSFrameRef *, const DeblockPP7Data * const VS_RESTRICT, const VSAPI *) noexcept;
+template void pp7Filter_sse4<uint8_t>(const VSFrameRef *, VSFrameRef *, const DeblockPP7Data * const VS_RESTRICT, const VSAPI *) noexcept;
+template void pp7Filter_sse4<uint16_t>(const VSFrameRef *, VSFrameRef *, const DeblockPP7Data * const VS_RESTRICT, const VSAPI *) noexcept;
 
 template<>
-void pp7Filter_sse2<float>(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Data * const VS_RESTRICT d, const VSAPI * vsapi) noexcept {
+void pp7Filter_sse4<float>(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Data * const VS_RESTRICT d, const VSAPI * vsapi) noexcept {
     const auto threadId = std::this_thread::get_id();
     float * buffer = reinterpret_cast<float *>(d->buffer.at(threadId));
 

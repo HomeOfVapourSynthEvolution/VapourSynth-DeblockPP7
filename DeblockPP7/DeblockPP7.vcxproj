@@ -86,6 +86,7 @@
   <ItemGroup>
     <ClCompile Include="DeblockPP7.cpp" />
     <ClCompile Include="DeblockPP7_SSE2.cpp" />
+    <ClCompile Include="DeblockPP7_SSE4.cpp" />
     <ClCompile Include="vectorclass\instrset_detect.cpp" />
   </ItemGroup>
   <ItemGroup>

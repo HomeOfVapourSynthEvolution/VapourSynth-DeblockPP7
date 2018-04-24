@@ -1,4 +1,4 @@
-AC_INIT([DeblockPP7], [2], [https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DeblockPP7/issues], [DeblockPP7], [https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DeblockPP7/])
+AC_INIT([DeblockPP7], [3], [https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DeblockPP7/issues], [DeblockPP7], [https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DeblockPP7/])
 
 : ${CXXFLAGS=""}
 
