@@ -1,4 +1,4 @@
-AC_INIT([DeblockPP7], [1], [https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DeblockPP7/issues], [DeblockPP7], [https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DeblockPP7/])
+AC_INIT([DeblockPP7], [2], [https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DeblockPP7/issues], [DeblockPP7], [https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DeblockPP7/])
 
 : ${CXXFLAGS=""}
 
@@ -36,9 +36,14 @@ AS_CASE(
 AS_IF(
       [test "x$X86" = "xtrue"],
       [
+       AC_DEFINE([VS_TARGET_CPU_X86])
+
        AC_SUBST([MFLAGS], ["-mfpmath=sse -msse2"])
       ]
 )
+
+
+AM_CONDITIONAL([VS_TARGET_CPU_X86], [test "x$X86" = "xtrue"])
 
 
 PKG_CHECK_MODULES([VapourSynth], [vapoursynth])

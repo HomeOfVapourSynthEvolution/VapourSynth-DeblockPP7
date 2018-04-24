@@ -18,5 +18,16 @@
     <ClCompile Include="DeblockPP7.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DeblockPP7_SSE2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vectorclass\instrset_detect.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="DeblockPP7.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

@@ -17,45 +17,23 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <algorithm>
 #include <memory>
 #include <string>
-#include <thread>
-#include <unordered_map>
 
-#include <VapourSynth.h>
-#include <VSHelper.h>
+#include "DeblockPP7.hpp"
 
-static constexpr int N = 1 << 16;
-static constexpr int N0 = 4;
-static constexpr int N1 = 5;
-static constexpr int N2 = 10;
-static constexpr int SN0 = 2;
-static constexpr double SN2 = 3.1622776601683795;
+#ifdef VS_TARGET_CPU_X86
+template<typename T> extern void pp7Filter_sse2(const VSFrameRef *, VSFrameRef *, const DeblockPP7Data * const VS_RESTRICT, const VSAPI *) noexcept;
+#endif
 
-struct DeblockPP7Data {
-    VSNodeRef * node;
-    const VSVideoInfo * vi;
-    bool process[3];
-    unsigned thresh[16];
-    std::unordered_map<std::thread::id, uint16_t *> bufferI;
-    std::unordered_map<std::thread::id, float *> bufferF;
-    const int16_t factor[16] = {
-        N / (N0 * N0), N / (N0 * N1), N / (N0 * N0), N / (N0 * N2),
-        N / (N1 * N0), N / (N1 * N1), N / (N1 * N0), N / (N1 * N2),
-        N / (N0 * N0), N / (N0 * N1), N / (N0 * N0), N / (N0 * N2),
-        N / (N2 * N0), N / (N2 * N1), N / (N2 * N0), N / (N2 * N2)
-    };
-};
-
-template<typename T1, typename T2, int scale>
-static inline void dctA(const T1 * srcp, T2 * VS_RESTRICT dstp, const int stride) noexcept {
+template<typename T, int scale>
+static inline void dctA(const T * srcp, T * VS_RESTRICT dstp, const int stride) noexcept {
     for (int i = 0; i < 4; i++) {
-        T2 s0 = (srcp[0 * stride] + srcp[6 * stride]) * scale;
-        T2 s1 = (srcp[1 * stride] + srcp[5 * stride]) * scale;
-        T2 s2 = (srcp[2 * stride] + srcp[4 * stride]) * scale;
-        T2 s3 = srcp[3 * stride] * scale;
-        T2 s = s3 + s3;
+        T s0 = (srcp[0 * stride] + srcp[6 * stride]) * scale;
+        T s1 = (srcp[1 * stride] + srcp[5 * stride]) * scale;
+        T s2 = (srcp[2 * stride] + srcp[4 * stride]) * scale;
+        T s3 = srcp[3 * stride] * scale;
+        T s = s3 + s3;
         s3 = s - s0;
         s0 = s + s0;
         s = s2 + s1;
@@ -93,22 +71,22 @@ static inline void dctB(const T * srcp, T * VS_RESTRICT dstp) noexcept {
 }
 
 template<typename T>
-static void pp7Filter(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Data * const VS_RESTRICT d, const VSAPI * vsapi) noexcept {
+static void pp7Filter_c(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Data * const VS_RESTRICT d, const VSAPI * vsapi) noexcept {
     const auto threadId = std::this_thread::get_id();
-    uint16_t * buffer = d->bufferI.at(threadId);
+    int * buffer = d->buffer.at(threadId);
 
     for (int plane = 0; plane < d->vi->format->numPlanes; plane++) {
         if (d->process[plane]) {
             const int width = vsapi->getFrameWidth(src, plane);
             const int height = vsapi->getFrameHeight(src, plane);
             const int srcStride = vsapi->getStride(src, plane) / sizeof(T);
-            const int stride = width + 16;
+            const int stride = d->stride[plane];
             const T * srcp = reinterpret_cast<const T *>(vsapi->getReadPtr(src, plane));
             T * VS_RESTRICT dstp = reinterpret_cast<T *>(vsapi->getWritePtr(dst, plane));
 
-            uint16_t * VS_RESTRICT p_src = buffer + stride * 8;
-            int * VS_RESTRICT block = reinterpret_cast<int *>(buffer);
-            int * VS_RESTRICT temp = reinterpret_cast<int *>(buffer + 32);
+            int * VS_RESTRICT p_src = buffer + stride * 8;
+            int * VS_RESTRICT block = buffer;
+            int * VS_RESTRICT temp = buffer + 16;
 
             for (int y = 0; y < height; y++) {
                 const int index = stride * (8 + y) + 8;
@@ -119,8 +97,8 @@ static void pp7Filter(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7
                 }
             }
             for (int y = 0; y < 8; y++) {
-                memcpy(p_src + stride * (7 - y), p_src + stride * (8 + y), stride * sizeof(uint16_t));
-                memcpy(p_src + stride * (height + 8 + y), p_src + stride * (height + 7 - y), stride * sizeof(uint16_t));
+                memcpy(p_src + stride * (7 - y), p_src + stride * (8 + y), stride * sizeof(int));
+                memcpy(p_src + stride * (height + 8 + y), p_src + stride * (height + 7 - y), stride * sizeof(int));
             }
 
             for (int y = 0; y < height; y++) {
@@ -128,7 +106,7 @@ static void pp7Filter(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7
                     const int index = (stride + 1) * (8 - 3) + stride * y + 8 + x;
                     int * VS_RESTRICT tp = temp + 4 * x;
 
-                    dctA<uint16_t, int, 1>(p_src + index, tp + 4 * 8, stride);
+                    dctA<int, 1>(p_src + index, tp + 4 * 8, stride);
                 }
 
                 for (int x = 0; x < width; x++) {
@@ -136,7 +114,7 @@ static void pp7Filter(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7
                     int * VS_RESTRICT tp = temp + 4 * x;
 
                     if (!(x & 3))
-                        dctA<uint16_t, int, 1>(p_src + index, tp + 4 * 8, stride);
+                        dctA<int, 1>(p_src + index, tp + 4 * 8, stride);
                     dctB(tp, block);
 
                     int64_t v = static_cast<int64_t>(block[0]) * d->factor[0];
@@ -163,22 +141,22 @@ static void pp7Filter(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7
 }
 
 template<>
-void pp7Filter<float>(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Data * const VS_RESTRICT d, const VSAPI * vsapi) noexcept {
+void pp7Filter_c<float>(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Data * const VS_RESTRICT d, const VSAPI * vsapi) noexcept {
     const auto threadId = std::this_thread::get_id();
-    float * buffer = d->bufferF.at(threadId);
+    float * buffer = reinterpret_cast<float *>(d->buffer.at(threadId));
 
     for (int plane = 0; plane < d->vi->format->numPlanes; plane++) {
         if (d->process[plane]) {
             const int width = vsapi->getFrameWidth(src, plane);
             const int height = vsapi->getFrameHeight(src, plane);
             const int srcStride = vsapi->getStride(src, plane) / sizeof(float);
-            const int stride = width + 16;
+            const int stride = d->stride[plane];
             const float * srcp = reinterpret_cast<const float *>(vsapi->getReadPtr(src, plane));
             float * VS_RESTRICT dstp = reinterpret_cast<float *>(vsapi->getWritePtr(dst, plane));
 
             float * VS_RESTRICT p_src = buffer + stride * 8;
-            float * VS_RESTRICT block = reinterpret_cast<float *>(buffer);
-            float * VS_RESTRICT temp = reinterpret_cast<float *>(buffer + 16);
+            float * VS_RESTRICT block = buffer;
+            float * VS_RESTRICT temp = buffer + 16;
 
             for (int y = 0; y < height; y++) {
                 const int index = stride * (8 + y) + 8;
@@ -198,7 +176,7 @@ void pp7Filter<float>(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7
                     const int index = (stride + 1) * (8 - 3) + stride * y + 8 + x;
                     float * VS_RESTRICT tp = temp + 4 * x;
 
-                    dctA<float, float, 255>(p_src + index, tp + 4 * 8, stride);
+                    dctA<float, 255>(p_src + index, tp + 4 * 8, stride);
                 }
 
                 for (int x = 0; x < width; x++) {
@@ -206,7 +184,7 @@ void pp7Filter<float>(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7
                     float * VS_RESTRICT tp = temp + 4 * x;
 
                     if (!(x & 3))
-                        dctA<float, float, 255>(p_src + index, tp + 4 * 8, stride);
+                        dctA<float, 255>(p_src + index, tp + 4 * 8, stride);
                     dctB(tp, block);
 
                     float v = block[0] * d->factor[0];
@@ -232,6 +210,35 @@ void pp7Filter<float>(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7
     }
 }
 
+static void selectFunctions(const unsigned opt, DeblockPP7Data * d) noexcept {
+#ifdef VS_TARGET_CPU_X86
+    const int iset = instrset_detect();
+#endif
+
+    if (d->vi->format->bytesPerSample == 1) {
+        d->pp7Filter = pp7Filter_c<uint8_t>;
+
+#ifdef VS_TARGET_CPU_X86
+        if ((opt == 0 && iset >= 2) || opt == 2)
+            d->pp7Filter = pp7Filter_sse2<uint8_t>;
+#endif
+    } else if (d->vi->format->bytesPerSample == 2) {
+        d->pp7Filter = pp7Filter_c<uint16_t>;
+
+#ifdef VS_TARGET_CPU_X86
+        if ((opt == 0 && iset >= 2) || opt == 2)
+            d->pp7Filter = pp7Filter_sse2<uint16_t>;
+#endif
+    } else {
+        d->pp7Filter = pp7Filter_c<float>;
+
+#ifdef VS_TARGET_CPU_X86
+        if ((opt == 0 && iset >= 2) || opt == 2)
+            d->pp7Filter = pp7Filter_sse2<float>;
+#endif
+    }
+}
+
 static void VS_CC pp7Init(VSMap *in, VSMap *out, void **instanceData, VSNode *node, VSCore *core, const VSAPI *vsapi) {
     DeblockPP7Data * d = static_cast<DeblockPP7Data *>(*instanceData);
     vsapi->setVideoInfo(d->vi, 1, node);
@@ -246,26 +253,11 @@ static const VSFrameRef *VS_CC pp7GetFrame(int n, int activationReason, void **i
         try {
             auto threadId = std::this_thread::get_id();
 
-            if (!d->bufferI.count(threadId)) {
-                if (d->vi->format->sampleType == stInteger) {
-                    uint16_t * buffer = new (std::nothrow) uint16_t[(d->vi->width + 16) * (d->vi->height + 16 + 8)];
-                    if (!buffer)
-                        throw std::string{ "malloc failure (buffer)" };
-                    d->bufferI.emplace(threadId, buffer);
-                } else {
-                    d->bufferI.emplace(threadId, nullptr);
-                }
-            }
-
-            if (!d->bufferF.count(threadId)) {
-                if (d->vi->format->sampleType == stFloat) {
-                    float * buffer = new (std::nothrow) float[(d->vi->width + 16) * (d->vi->height + 16 + 8)];
-                    if (!buffer)
-                        throw std::string{ "malloc failure (buffer)" };
-                    d->bufferF.emplace(threadId, buffer);
-                } else {
-                    d->bufferF.emplace(threadId, nullptr);
-                }
+            if (!d->buffer.count(threadId)) {
+                int * buffer = reinterpret_cast<int *>(vs_aligned_malloc(d->stride[0] * (d->vi->height + 16 + 8) * sizeof(int), 16));
+                if (!buffer)
+                    throw std::string{ "malloc failure (buffer)" };
+                d->buffer.emplace(threadId, buffer);
             }
         } catch (const std::string & error) {
             vsapi->setFilterError(("DeblockPP7: " + error).c_str(), frameCtx);
@@ -277,12 +269,7 @@ static const VSFrameRef *VS_CC pp7GetFrame(int n, int activationReason, void **i
         const int pl[] = { 0, 1, 2 };
         VSFrameRef * dst = vsapi->newVideoFrame2(d->vi->format, d->vi->width, d->vi->height, fr, pl, src, core);
 
-        if (d->vi->format->bytesPerSample == 1)
-            pp7Filter<uint8_t>(src, dst, d, vsapi);
-        else if (d->vi->format->bytesPerSample == 2)
-            pp7Filter<uint16_t>(src, dst, d, vsapi);
-        else
-            pp7Filter<float>(src, dst, d, vsapi);
+        d->pp7Filter(src, dst, d, vsapi);
 
         vsapi->freeFrame(src);
         return dst;
@@ -296,11 +283,8 @@ static void VS_CC pp7Free(void *instanceData, VSCore *core, const VSAPI *vsapi) 
 
     vsapi->freeNode(d->node);
 
-    for (auto & iter : d->bufferI)
-        delete[] iter.second;
-
-    for (auto & iter : d->bufferF)
-        delete[] iter.second;
+    for (auto & iter : d->buffer)
+        vs_aligned_free(iter.second);
 
     delete d;
 }
@@ -324,6 +308,8 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
         if (err)
             qp = 5;
 
+        const int opt = int64ToIntS(vsapi->propGetInt(in, "opt", 0, &err));
+
         const int m = vsapi->propNumElements(in, "planes");
 
         for (int i = 0; i < 3; i++)
@@ -343,6 +329,9 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
 
         if (qp < 1 || qp > 63)
             throw std::string{ "qp must be between 1 and 63 (inclusive)" };
+
+        if (opt < 0 || opt > 2)
+            throw std::string{ "opt must be 0, 1 or 2" };
 
         if (padWidth || padHeight) {
             VSMap * args = vsapi->createMap();
@@ -367,11 +356,17 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
             vsapi->freeMap(ret);
         }
 
+        selectFunctions(opt, d.get());
+
         const unsigned numThreads = vsapi->getCoreInfo(core)->numThreads;
-        d->bufferI.reserve(numThreads);
-        d->bufferF.reserve(numThreads);
+        d->buffer.reserve(numThreads);
 
         const int peak = (d->vi->format->sampleType == stInteger) ? (1 << d->vi->format->bitsPerSample) - 1 : 255;
+
+        for (int plane = 0; plane < d->vi->format->numPlanes; plane++) {
+            const int width = d->vi->width >> (plane ? d->vi->format->subSamplingW : 0);
+            d->stride[plane] = (width + 16 + 15) & ~15;
+        }
 
         for (int i = 0; i < 16; i++)
             d->thresh[i] = static_cast<unsigned>((((i & 1) ? SN2 : SN0) * ((i & 4) ? SN2 : SN0) * qp * (1 << 2) - 1) * peak / 255);
@@ -417,6 +412,7 @@ VS_EXTERNAL_API(void) VapourSynthPluginInit(VSConfigPlugin configFunc, VSRegiste
     registerFunc("DeblockPP7",
                  "clip:clip;"
                  "qp:int:opt;"
+                 "opt:int:opt;"
                  "planes:int[]:opt;",
                  pp7Create, nullptr, plugin);
 }
