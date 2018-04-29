@@ -119,17 +119,37 @@ static void pp7Filter_c(const VSFrameRef * src, VSFrameRef * dst, const DeblockP
                     dctB(tp, block);
 
                     int64_t v = static_cast<int64_t>(block[0]) * d->factor[0];
-                    for (int i = 1; i < 16; i++) {
-                        const unsigned threshold1 = d->thresh[i];
-                        const unsigned threshold2 = threshold1 * 2;
-                        if (block[i] + threshold1 > threshold2) {
-                            if (block[i] + threshold2 > threshold2 * 2) {
+                    if (d->mode == 0) {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (block[i] + threshold1 > threshold2)
                                 v += static_cast<int64_t>(block[i]) * d->factor[i];
-                            } else {
+                        }
+                    } else if (d->mode == 1) {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (block[i] + threshold1 > threshold2) {
                                 if (block[i] > 0)
-                                    v += 2LL * (block[i] - static_cast<int>(threshold1)) * d->factor[i];
+                                    v += (block[i] - static_cast<int64_t>(threshold1)) * d->factor[i];
                                 else
-                                    v += 2LL * (block[i] + static_cast<int>(threshold1)) * d->factor[i];
+                                    v += (block[i] + static_cast<int64_t>(threshold1)) * d->factor[i];
+                            }
+                        }
+                    } else {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (block[i] + threshold1 > threshold2) {
+                                if (block[i] + threshold2 > threshold2 * 2) {
+                                    v += static_cast<int64_t>(block[i]) * d->factor[i];
+                                } else {
+                                    if (block[i] > 0)
+                                        v += 2 * (block[i] - static_cast<int64_t>(threshold1)) * d->factor[i];
+                                    else
+                                        v += 2 * (block[i] + static_cast<int64_t>(threshold1)) * d->factor[i];
+                                }
                             }
                         }
                     }
@@ -192,22 +212,42 @@ void pp7Filter_c<float>(const VSFrameRef * src, VSFrameRef * dst, const DeblockP
                     dctB(tp, block);
 
                     float v = block[0] * d->factor[0];
-                    for (int i = 1; i < 16; i++) {
-                        const unsigned threshold1 = d->thresh[i];
-                        const unsigned threshold2 = threshold1 * 2;
-                        if (static_cast<unsigned>(block[i]) + threshold1 > threshold2) {
-                            if (static_cast<unsigned>(block[i]) + threshold2 > threshold2 * 2) {
+                    if (d->mode == 0) {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (static_cast<unsigned>(block[i]) + threshold1 > threshold2)
                                 v += block[i] * d->factor[i];
-                            } else {
+                        }
+                    } else if (d->mode == 1) {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (static_cast<unsigned>(block[i]) + threshold1 > threshold2) {
                                 if (block[i] > 0.f)
-                                    v += 2.f * (block[i] - threshold1) * d->factor[i];
+                                    v += (block[i] - threshold1) * d->factor[i];
                                 else
-                                    v += 2.f * (block[i] + threshold1) * d->factor[i];
+                                    v += (block[i] + threshold1) * d->factor[i];
+                            }
+                        }
+                    } else {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (static_cast<unsigned>(block[i]) + threshold1 > threshold2) {
+                                if (static_cast<unsigned>(block[i]) + threshold2 > threshold2 * 2) {
+                                    v += block[i] * d->factor[i];
+                                } else {
+                                    if (block[i] > 0.f)
+                                        v += 2.f * (block[i] - threshold1) * d->factor[i];
+                                    else
+                                        v += 2.f * (block[i] + threshold1) * d->factor[i];
+                                }
                             }
                         }
                     }
 
-                    dstp[srcStride * y + x] = v * (1.f / (1 << 18)) * (1.f / 255.f);
+                    dstp[srcStride * y + x] = v * ((1.f / (1 << 18)) * (1.f / 255.f));
                 }
             }
         }
@@ -314,9 +354,11 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
             (d->vi->format->sampleType == stFloat && d->vi->format->bitsPerSample != 32))
             throw std::string{ "only constant format 8-16 bit integer and 32 bit float input supported" };
 
-        int qp = int64ToIntS(vsapi->propGetInt(in, "qp", 0, &err));
+        double qp = vsapi->propGetFloat(in, "qp", 0, &err);
         if (err)
-            qp = 5;
+            qp = 2.;
+
+        d->mode = int64ToIntS(vsapi->propGetInt(in, "mode", 0, &err));
 
         const int opt = int64ToIntS(vsapi->propGetInt(in, "opt", 0, &err));
 
@@ -337,8 +379,11 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
             d->process[n] = true;
         }
 
-        if (qp < 1 || qp > 63)
-            throw std::string{ "qp must be between 1 and 63 (inclusive)" };
+        if (qp < 1. || qp > 63.)
+            throw std::string{ "qp must be between 1.0 and 63.0 (inclusive)" };
+
+        if (d->mode < 0 || d->mode > 2)
+            throw std::string{ "mode must be 0, 1 or 2" };
 
         if (opt < 0 || opt > 3)
             throw std::string{ "opt must be 0, 1, 2 or 3" };
@@ -379,7 +424,7 @@ static void VS_CC pp7Create(const VSMap *in, VSMap *out, void *userData, VSCore 
         }
 
         for (int i = 0; i < 16; i++)
-            d->thresh[i] = static_cast<unsigned>((((i & 1) ? SN2 : SN0) * ((i & 4) ? SN2 : SN0) * qp * (1 << 2) - 1) * d->peak / 255);
+            d->thresh[i] = static_cast<unsigned>((((i & 1) ? SN2 : SN0) * ((i & 4) ? SN2 : SN0) * qp * (1 << 2) - 1) * d->peak / 255.);
     } catch (const std::string & error) {
         vsapi->setError(out, ("DeblockPP7: " + error).c_str());
         vsapi->freeNode(d->node);
@@ -421,7 +466,8 @@ VS_EXTERNAL_API(void) VapourSynthPluginInit(VSConfigPlugin configFunc, VSRegiste
     configFunc("com.holywu.pp7", "pp7", "Postprocess 7 from MPlayer", VAPOURSYNTH_API_VERSION, 1, plugin);
     registerFunc("DeblockPP7",
                  "clip:clip;"
-                 "qp:int:opt;"
+                 "qp:float:opt;"
+                 "mode:int:opt;"
                  "opt:int:opt;"
                  "planes:int[]:opt;",
                  pp7Create, nullptr, plugin);

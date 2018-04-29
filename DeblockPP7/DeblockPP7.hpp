@@ -22,6 +22,7 @@ static constexpr double SN2 = 3.1622776601683795;
 struct DeblockPP7Data {
     VSNodeRef * node;
     const VSVideoInfo * vi;
+    int mode;
     bool process[3];
     int stride[3];
     unsigned thresh[16], peak;

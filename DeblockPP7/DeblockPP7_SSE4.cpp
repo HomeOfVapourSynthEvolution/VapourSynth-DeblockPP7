@@ -139,17 +139,37 @@ void pp7Filter_sse4(const VSFrameRef * src, VSFrameRef * dst, const DeblockPP7Da
                     dctB<int, Vec4i>(tp, block);
 
                     int64_t v = static_cast<int64_t>(block[0]) * d->factor[0];
-                    for (int i = 1; i < 16; i++) {
-                        const unsigned threshold1 = d->thresh[i];
-                        const unsigned threshold2 = threshold1 * 2;
-                        if (block[i] + threshold1 > threshold2) {
-                            if (block[i] + threshold2 > threshold2 * 2) {
+                    if (d->mode == 0) {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (block[i] + threshold1 > threshold2)
                                 v += static_cast<int64_t>(block[i]) * d->factor[i];
-                            } else {
+                        }
+                    } else if (d->mode == 1) {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (block[i] + threshold1 > threshold2) {
                                 if (block[i] > 0)
-                                    v += 2LL * (block[i] - static_cast<int>(threshold1)) * d->factor[i];
+                                    v += (block[i] - static_cast<int64_t>(threshold1)) * d->factor[i];
                                 else
-                                    v += 2LL * (block[i] + static_cast<int>(threshold1)) * d->factor[i];
+                                    v += (block[i] + static_cast<int64_t>(threshold1)) * d->factor[i];
+                            }
+                        }
+                    } else {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (block[i] + threshold1 > threshold2) {
+                                if (block[i] + threshold2 > threshold2 * 2) {
+                                    v += static_cast<int64_t>(block[i]) * d->factor[i];
+                                } else {
+                                    if (block[i] > 0)
+                                        v += 2 * (block[i] - static_cast<int64_t>(threshold1)) * d->factor[i];
+                                    else
+                                        v += 2 * (block[i] + static_cast<int64_t>(threshold1)) * d->factor[i];
+                                }
                             }
                         }
                     }
@@ -215,22 +235,42 @@ void pp7Filter_sse4<float>(const VSFrameRef * src, VSFrameRef * dst, const Deblo
                     dctB<float, Vec4f>(tp, block);
 
                     float v = block[0] * d->factor[0];
-                    for (int i = 1; i < 16; i++) {
-                        const unsigned threshold1 = d->thresh[i];
-                        const unsigned threshold2 = threshold1 * 2;
-                        if (static_cast<unsigned>(block[i]) + threshold1 > threshold2) {
-                            if (static_cast<unsigned>(block[i]) + threshold2 > threshold2 * 2) {
+                    if (d->mode == 0) {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (static_cast<unsigned>(block[i]) + threshold1 > threshold2)
                                 v += block[i] * d->factor[i];
-                            } else {
+                        }
+                    } else if (d->mode == 1) {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (static_cast<unsigned>(block[i]) + threshold1 > threshold2) {
                                 if (block[i] > 0.f)
-                                    v += 2.f * (block[i] - threshold1) * d->factor[i];
+                                    v += (block[i] - threshold1) * d->factor[i];
                                 else
-                                    v += 2.f * (block[i] + threshold1) * d->factor[i];
+                                    v += (block[i] + threshold1) * d->factor[i];
+                            }
+                        }
+                    } else {
+                        for (int i = 1; i < 16; i++) {
+                            const unsigned threshold1 = d->thresh[i];
+                            const unsigned threshold2 = threshold1 * 2;
+                            if (static_cast<unsigned>(block[i]) + threshold1 > threshold2) {
+                                if (static_cast<unsigned>(block[i]) + threshold2 > threshold2 * 2) {
+                                    v += block[i] * d->factor[i];
+                                } else {
+                                    if (block[i] > 0.f)
+                                        v += 2.f * (block[i] - threshold1) * d->factor[i];
+                                    else
+                                        v += 2.f * (block[i] + threshold1) * d->factor[i];
+                                }
                             }
                         }
                     }
 
-                    dstp[srcStride * y + x] = v * (1.f / (1 << 18)) * (1.f / 255.f);
+                    dstp[srcStride * y + x] = v * ((1.f / (1 << 18)) * (1.f / 255.f));
                 }
             }
         }
